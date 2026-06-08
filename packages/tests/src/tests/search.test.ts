@@ -1005,4 +1005,79 @@ describe("shadcn search", () => {
     )
     expect(itemItem.addCommandArgument).toBe("@two/item")
   })
+
+  it("filters results by type (shorthand and full namespace)", async () => {
+    const fixturePath = await createFixtureTestDirectory("next-app-init")
+    await configureRegistries(fixturePath, {
+      "@shadcn": "http://localhost:9180/r/{name}",
+      "@one": "http://localhost:9181/r/{name}",
+    })
+
+    // @shadcn items are registry:ui, @one items are registry:component.
+    const uiOutput = await runSearch(fixturePath, [
+      "search",
+      "@shadcn",
+      "@one",
+      "--type",
+      "ui",
+    ])
+    const ui = JSON.parse(uiOutput.stdout)
+    expect(ui.items.length).toBeGreaterThan(0)
+    expect(ui.items.every((item: any) => item.type === "registry:ui")).toBe(
+      true
+    )
+
+    // Full namespaced form is accepted too.
+    const componentOutput = await runSearch(fixturePath, [
+      "search",
+      "@shadcn",
+      "@one",
+      "--type",
+      "registry:component",
+    ])
+    const component = JSON.parse(componentOutput.stdout)
+    expect(component.items.length).toBeGreaterThan(0)
+    expect(
+      component.items.every((item: any) => item.type === "registry:component")
+    ).toBe(true)
+  })
+
+  it("searches all configured registries when no registry is provided", async () => {
+    const fixturePath = await createFixtureTestDirectory("next-app-init")
+    await configureRegistries(fixturePath, {
+      "@shadcn": "http://localhost:9180/r/{name}",
+      "@one": "http://localhost:9181/r/{name}",
+      "@two": "http://localhost:9182/registry/{name}",
+    })
+
+    const output = await runSearch(fixturePath, ["search"])
+    const parsed = JSON.parse(output.stdout)
+
+    const registries = parsed.items.map((item: any) => item.registry)
+    // Configured registries are searched...
+    expect(registries).toContain("@one")
+    expect(registries).toContain("@two")
+    // ...but the builtin @shadcn is excluded from "search all".
+    expect(registries).not.toContain("@shadcn")
+  })
+
+  it("skips unreachable registries when searching all and reports them", async () => {
+    const fixturePath = await createFixtureTestDirectory("next-app-init")
+    await configureRegistries(fixturePath, {
+      "@one": "http://localhost:9181/r/{name}",
+      "@down": "http://localhost:9999/r/{name}", // no server listening
+    })
+
+    const output = await runSearch(fixturePath, ["search"])
+    const parsed = JSON.parse(output.stdout)
+
+    // The working registry still returns items.
+    expect(parsed.items.some((item: any) => item.registry === "@one")).toBe(
+      true
+    )
+    // The unreachable registry is reported in errors instead of aborting.
+    expect(parsed.errors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ registry: "@down" })])
+    )
+  })
 })
