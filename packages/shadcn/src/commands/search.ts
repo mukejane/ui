@@ -41,7 +41,7 @@ export const search = new Command()
   .option("-q, --query <query>", "query string")
   .option(
     "-l, --limit <number>",
-    "maximum number of items to display per registry",
+    "maximum number of items to display",
     "100"
   )
   .option("-o, --offset <number>", "number of items to skip", "0")

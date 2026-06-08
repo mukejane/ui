@@ -33,30 +33,37 @@ export async function searchRegistries(
   let allItems: z.infer<typeof searchResultItemSchema>[] = []
   const errors: z.infer<typeof searchResultErrorSchema>[] = []
 
-  for (const registry of registries) {
-    let registryData: Awaited<ReturnType<typeof getRegistry>>
-    try {
-      registryData = await getRegistry(registry, { config, useCache })
-    } catch (error) {
+  // Fetch every registry in parallel, then process the results in the original
+  // order so the output is deterministic regardless of which responses land
+  // first. This matters most when searching many registries at once.
+  const outcomes = await Promise.allSettled(
+    registries.map((registry) => getRegistry(registry, { config, useCache }))
+  )
+
+  for (let index = 0; index < registries.length; index++) {
+    const registry = registries[index]
+    const outcome = outcomes[index]
+
+    if (outcome.status === "rejected") {
       if (!continueOnError) {
-        throw error
+        throw outcome.reason
       }
       errors.push({
         registry,
-        message: error instanceof Error ? error.message : String(error),
+        message:
+          outcome.reason instanceof Error
+            ? outcome.reason.message
+            : String(outcome.reason),
       })
       continue
     }
 
-    const itemsWithRegistry = (registryData.items || []).map((item) => ({
+    const itemsWithRegistry = (outcome.value.items || []).map((item) => ({
       name: item.name,
       type: item.type,
       description: item.description,
-      registry: registry,
-      addCommandArgument: buildRegistryItemNameFromRegistry(
-        item.name,
-        registry
-      ),
+      registry,
+      addCommandArgument: buildRegistryItemNameFromRegistry(item.name, registry),
     }))
 
     allItems = allItems.concat(itemsWithRegistry)

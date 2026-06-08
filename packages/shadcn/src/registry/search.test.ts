@@ -198,6 +198,44 @@ describe("searchRegistries", () => {
     mockGetRegistry.mockRestore()
   })
 
+  it("preserves argument order even when responses resolve out of order", async () => {
+    vi.mock("./api", () => ({
+      getRegistry: vi.fn(),
+    }))
+
+    const mockGetRegistry = vi.mocked(getRegistry)
+
+    // @slow resolves after @fast, but its items must still come first because
+    // it is listed first. Guards the parallel fetch / ordered processing.
+    mockGetRegistry.mockImplementation(async (name: string) => {
+      if (name === "@slow") {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        return {
+          name: "slow",
+          homepage: "https://slow.com",
+          items: [{ name: "slow-item", type: "registry:ui", description: "" }],
+        }
+      }
+      if (name === "@fast") {
+        return {
+          name: "fast",
+          homepage: "https://fast.com",
+          items: [{ name: "fast-item", type: "registry:ui", description: "" }],
+        }
+      }
+      throw new Error(`Unknown registry: ${name}`)
+    })
+
+    const results = await searchRegistries(["@slow", "@fast"])
+
+    expect(results.items.map((item) => item.name)).toEqual([
+      "slow-item",
+      "fast-item",
+    ])
+
+    mockGetRegistry.mockRestore()
+  })
+
   it("should return empty items when search has no matches", async () => {
     vi.mock("./api", () => ({
       getRegistry: vi.fn(),
