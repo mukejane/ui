@@ -1,5 +1,11 @@
-import { searchResultItemSchema, searchResultsSchema } from "@/src/schema"
+import {
+  searchResultErrorSchema,
+  searchResultItemSchema,
+  searchResultsSchema,
+} from "@/src/schema"
 import { Config } from "@/src/utils/get-config"
+import { highlighter } from "@/src/utils/highlighter"
+import { logger } from "@/src/utils/logger"
 import fuzzysort from "fuzzysort"
 import { z } from "zod"
 
@@ -14,14 +20,33 @@ export async function searchRegistries(
     offset?: number
     config?: Partial<Config>
     useCache?: boolean
+    // When true, a registry that fails to load is skipped (and recorded in the
+    // returned `errors`) instead of throwing. Use this when searching across
+    // many registries (e.g. all configured registries) so one broken registry
+    // does not abort the entire search.
+    continueOnError?: boolean
   }
 ) {
-  const { query, limit, offset, config, useCache } = options || {}
+  const { query, limit, offset, config, useCache, continueOnError } =
+    options || {}
 
   let allItems: z.infer<typeof searchResultItemSchema>[] = []
+  const errors: z.infer<typeof searchResultErrorSchema>[] = []
 
   for (const registry of registries) {
-    const registryData = await getRegistry(registry, { config, useCache })
+    let registryData: Awaited<ReturnType<typeof getRegistry>>
+    try {
+      registryData = await getRegistry(registry, { config, useCache })
+    } catch (error) {
+      if (!continueOnError) {
+        throw error
+      }
+      errors.push({
+        registry,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      continue
+    }
 
     const itemsWithRegistry = (registryData.items || []).map((item) => ({
       name: item.name,
@@ -57,6 +82,9 @@ export async function searchRegistries(
       hasMore: paginationOffset + paginationLimit < totalItems,
     },
     items: allItems.slice(paginationOffset, paginationOffset + paginationLimit),
+    // Only surface errors when present so consumers parsing successful
+    // searches see the same shape as before.
+    ...(errors.length > 0 ? { errors } : {}),
   }
 
   return searchResultsSchema.parse(result)
@@ -178,4 +206,119 @@ export function buildRegistryItemNameFromRegistry(
   const updatedQuery = queryAndAfter.replace(/\bregistry\b/g, name)
 
   return hostPart + updatedPath + updatedQuery
+}
+
+export const SEARCH_RESULT_DESCRIPTION_MAX_LENGTH = 80
+
+export function formatSearchResultType(type?: string) {
+  if (!type) {
+    return ""
+  }
+
+  return type.startsWith("registry:") ? type.slice("registry:".length) : type
+}
+
+export function formatSearchResultDescription(
+  description: string,
+  maxLength = SEARCH_RESULT_DESCRIPTION_MAX_LENGTH
+) {
+  const normalized = description.trim().replace(/\s+/g, " ")
+
+  if (normalized.length <= maxLength) {
+    return normalized
+  }
+
+  const truncated = normalized.slice(0, maxLength - 3).trimEnd()
+  const lastSpace = truncated.lastIndexOf(" ")
+  const base =
+    lastSpace > maxLength * 0.6 ? truncated.slice(0, lastSpace) : truncated
+
+  return `${base.trimEnd()}...`
+}
+
+function formatSearchResultItem(
+  item: z.infer<typeof searchResultsSchema>["items"][number],
+  options: {
+    showRegistry: boolean
+  }
+) {
+  const name = item.addCommandArgument ?? item.name
+  const type = formatSearchResultType(item.type)
+  const typeSuffix = type ? ` (${type})` : ""
+  const registrySuffix =
+    options.showRegistry && item.registry ? ` · ${item.registry}` : ""
+  const descriptionSuffix = item.description
+    ? ` — ${formatSearchResultDescription(item.description)}`
+    : ""
+
+  return `- ${highlighter.info(name)}${typeSuffix}${registrySuffix}${descriptionSuffix}`
+}
+
+// Describes what was searched, e.g. ` matching "button" in @one, @two`. Shared
+// by the results header and the empty-state message so they stay in sync.
+function formatSearchScope(options: {
+  query?: string
+  registries: string[]
+}) {
+  const { query, registries } = options
+
+  let scope = ""
+  if (query) {
+    scope += ` matching ${highlighter.info(`"${query}"`)}`
+  }
+  if (registries.length > 0) {
+    scope += ` in ${registries.join(", ")}`
+  }
+
+  return scope
+}
+
+export function printSearchResults(
+  results: z.infer<typeof searchResultsSchema>,
+  options: {
+    query?: string
+    registries: string[]
+  }
+) {
+  const { pagination, items, errors } = results
+  const showRegistry = options.registries.length > 1
+
+  // Surface any registries that were skipped during the search so users know
+  // the results may be incomplete.
+  if (errors?.length) {
+    for (const { registry, message } of errors) {
+      logger.warn(`Skipped ${registry}: ${message}`)
+    }
+    logger.break()
+  }
+
+  if (items.length === 0) {
+    logger.warn(`No items found${formatSearchScope(options)}.`)
+    return
+  }
+
+  const itemCount = `${pagination.total} item${
+    pagination.total === 1 ? "" : "s"
+  }`
+  logger.info(`Found ${itemCount}${formatSearchScope(options)}`)
+
+  const start = pagination.offset + 1
+  const end = Math.min(pagination.offset + pagination.limit, pagination.total)
+  logger.log(`Showing ${start}-${end} of ${pagination.total}`)
+  logger.break()
+
+  logger.log(
+    items
+      .map((item) => formatSearchResultItem(item, { showRegistry }))
+      .join("\n")
+  )
+
+  if (pagination.hasMore) {
+    logger.break()
+    logger.log(
+      `More items available. Use ${highlighter.info(
+        `--offset ${pagination.offset + pagination.limit}`
+      )} to see the next page.`
+    )
+  }
 }

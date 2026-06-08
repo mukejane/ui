@@ -1,5 +1,7 @@
+import { getConfig } from "@/src/utils/get-config"
 import { ensureRegistriesInConfig } from "@/src/utils/registries"
 import { searchRegistries } from "@/src/registry/search"
+import fsExtra from "fs-extra"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { search } from "./search"
@@ -87,7 +89,10 @@ vi.mock("@/src/registry/validator", () => ({
   validateRegistryConfigForItems: vi.fn(),
 }))
 
-vi.mock("@/src/registry/search", () => ({
+// Stub searchRegistries but keep the real printSearchResults (both now live
+// in @/src/registry/search) so the human-readable output is exercised.
+vi.mock("@/src/registry/search", async (importActual) => ({
+  ...(await importActual<typeof import("@/src/registry/search")>()),
   searchRegistries: vi.fn(() => mockResults),
 }))
 
@@ -177,6 +182,92 @@ describe("search command", () => {
     ).rejects.toThrow("process.exit:0")
 
     expect(log).toHaveBeenCalledWith(JSON.stringify(mockResults, null, 2))
+
+    log.mockRestore()
+    exit.mockRestore()
+  })
+
+  it("requires a registry when no components.json is present", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    const exit = mockProcessExit()
+
+    // fs-extra.existsSync is mocked to return false (no components.json).
+    // This is a usage error, so it prints a message and exits 1 directly
+    // instead of routing through handleError.
+    await expect(
+      search.parseAsync(["--cwd", "/tmp/test-project"], {
+        from: "user",
+      })
+    ).rejects.toThrow("process.exit:1")
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Provide a registry or namespace to search")
+    )
+    expect(searchRegistries).not.toHaveBeenCalled()
+
+    log.mockRestore()
+    exit.mockRestore()
+  })
+
+  it("requires a registry when components.json has no registries", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    const exit = mockProcessExit()
+
+    vi.mocked(fsExtra.existsSync).mockReturnValueOnce(true as never)
+    vi.mocked(fsExtra.readJson).mockResolvedValueOnce({ style: "new-york" })
+    // components.json present but with no configured registries (only the
+    // builtin @shadcn, which is excluded from "search all").
+    vi.mocked(getConfig).mockReturnValueOnce({ ...baseConfig } as never)
+
+    await expect(
+      search.parseAsync(["--cwd", "/tmp/test-project"], {
+        from: "user",
+      })
+    ).rejects.toThrow("process.exit:1")
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("No registries are configured")
+    )
+    expect(searchRegistries).not.toHaveBeenCalled()
+
+    log.mockRestore()
+    exit.mockRestore()
+  })
+
+  it("searches all configured registries when none are provided", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    const exit = mockProcessExit()
+
+    vi.mocked(fsExtra.existsSync).mockReturnValueOnce(true as never)
+    // readJson returns a raw (unresolved) components.json shape.
+    vi.mocked(fsExtra.readJson).mockResolvedValueOnce({ style: "new-york" })
+    vi.mocked(getConfig).mockReturnValueOnce({
+      ...baseConfig,
+      registries: {
+        "@acme": "https://acme.com/{name}.json",
+        "@internal": "https://internal.com/{name}.json",
+      },
+    } as never)
+
+    await expect(
+      search.parseAsync(["--cwd", "/tmp/test-project"], {
+        from: "user",
+      })
+    ).rejects.toThrow("process.exit:0")
+
+    // No explicit namespace args, so nothing to discover.
+    expect(ensureRegistriesInConfig).toHaveBeenCalledWith(
+      [],
+      expect.any(Object),
+      expect.any(Object)
+    )
+
+    // Only the configured registries are searched (builtin @shadcn is
+    // excluded), and per-registry failures are tolerated.
+    expect(searchRegistries).toHaveBeenCalledWith(
+      ["@acme", "@internal"],
+      expect.objectContaining({ continueOnError: true })
+    )
 
     log.mockRestore()
     exit.mockRestore()

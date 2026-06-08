@@ -1,13 +1,15 @@
 import path from "path"
 import { configWithDefaults } from "@/src/registry/config"
+import { BUILTIN_REGISTRIES } from "@/src/registry/constants"
 import { clearRegistryContext } from "@/src/registry/context"
-import { searchRegistries } from "@/src/registry/search"
+import { printSearchResults, searchRegistries } from "@/src/registry/search"
 import { validateRegistryConfigForItems } from "@/src/registry/validator"
 import { rawConfigSchema } from "@/src/schema"
 import { loadEnvFiles } from "@/src/utils/env-loader"
 import { createConfig, getConfig } from "@/src/utils/get-config"
-import { printSearchResults } from "@/src/utils/format-search-results"
 import { handleError } from "@/src/utils/handle-error"
+import { highlighter } from "@/src/utils/highlighter"
+import { logger } from "@/src/utils/logger"
 import { ensureRegistriesInConfig } from "@/src/utils/registries"
 import { Command } from "commander"
 import fsExtra from "fs-extra"
@@ -28,8 +30,8 @@ export const search = new Command()
   .alias("list")
   .description("search items from registries")
   .argument(
-    "<registries...>",
-    "the registry addresses to search. Supports namespaces, GitHub sources and URLs."
+    "[registries...]",
+    "the registry addresses to search. Supports namespaces, GitHub sources and URLs. When omitted, searches all registries configured in components.json."
   )
   .option(
     "-c, --cwd <cwd>",
@@ -67,7 +69,8 @@ export const search = new Command()
 
       // Check if there's a components.json file (partial or complete).
       const componentsJsonPath = path.resolve(options.cwd, "components.json")
-      if (fsExtra.existsSync(componentsJsonPath)) {
+      const hasComponentsJson = fsExtra.existsSync(componentsJsonPath)
+      if (hasComponentsJson) {
         const existingConfig = await fsExtra.readJson(componentsJsonPath)
         const partialConfig = rawConfigSchema.partial().parse(existingConfig)
         shadowConfig = configWithDefaults({
@@ -87,6 +90,33 @@ export const search = new Command()
         // Use shadow config if getConfig fails (partial components.json).
       }
 
+      // When no registry is provided, search across every registry configured
+      // in components.json. This only makes sense when a components.json is
+      // present to enumerate; otherwise there is nothing to search and we ask
+      // for an explicit registry/namespace argument.
+      const searchAllConfigured = registries.length === 0
+      if (searchAllConfigured && !hasComponentsJson) {
+        logger.break()
+        logger.error(
+          `Provide a registry or namespace to search, e.g. ${highlighter.info(
+            "shadcn search @shadcn"
+          )}.`
+        )
+        logger.break()
+        logger.error(
+          `If you have a ${highlighter.info(
+            "components.json"
+          )} with registries configured, run ${highlighter.info(
+            "shadcn search"
+          )} with no arguments to search all of them.`
+        )
+        logger.break()
+        process.exit(1)
+      }
+
+      // Only namespace registries passed explicitly need to be discovered and
+      // added to the config. Registries already configured in components.json
+      // are resolved directly from the config below.
       const { config: updatedConfig, newRegistries } =
         await ensureRegistriesInConfig(
           registries
@@ -102,15 +132,48 @@ export const search = new Command()
         config.registries = updatedConfig.registries
       }
 
-      // Validate registries early for better error messages.
-      validateRegistryConfigForItems(registries, config)
+      // When searching all configured registries, exclude the builtin
+      // registries (e.g. @shadcn) — "search all" means the registries the user
+      // actually configured in components.json, not the defaults we inject.
+      const registriesToSearch = searchAllConfigured
+        ? Object.keys(config.registries ?? {}).filter(
+            (registry) => !(registry in BUILTIN_REGISTRIES)
+          )
+        : registries
 
-      // Use searchRegistries for both search and non-search cases
-      const results = await searchRegistries(registries as `@${string}`[], {
+      if (searchAllConfigured && registriesToSearch.length === 0) {
+        logger.break()
+        logger.error(
+          `No registries are configured in ${highlighter.info(
+            "components.json"
+          )}.`
+        )
+        logger.error(
+          `Provide a registry or namespace to search, e.g. ${highlighter.info(
+            "shadcn search @shadcn"
+          )}.`
+        )
+        logger.break()
+        process.exit(1)
+      }
+
+      // For explicitly requested registries we validate up front so the user
+      // gets a clear error (e.g. missing env vars). When searching every
+      // configured registry we skip strict validation and instead tolerate
+      // individual registry failures (see continueOnError below).
+      if (!searchAllConfigured) {
+        validateRegistryConfigForItems(registriesToSearch, config)
+      }
+
+      const results = await searchRegistries(registriesToSearch, {
         query: options.query,
         limit: options.limit,
         offset: options.offset,
         config,
+        // Tolerate per-registry failures when searching every configured
+        // registry; failures are returned in `results.errors` so they can be
+        // surfaced to humans (printSearchResults) and machines (--json) alike.
+        continueOnError: searchAllConfigured,
       })
 
       if (opts.json) {
@@ -118,7 +181,7 @@ export const search = new Command()
       } else {
         printSearchResults(results, {
           query: options.query,
-          registries,
+          registries: registriesToSearch,
         })
       }
 

@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest"
 
 import { getRegistry } from "./api"
-import { buildRegistryItemNameFromRegistry, searchRegistries } from "./search"
+import {
+  buildRegistryItemNameFromRegistry,
+  formatSearchResultDescription,
+  formatSearchResultType,
+  printSearchResults,
+  searchRegistries,
+  SEARCH_RESULT_DESCRIPTION_MAX_LENGTH,
+} from "./search"
 
 describe("searchRegistries", () => {
   it("should fetch and return registries in flat format", async () => {
@@ -148,6 +155,45 @@ describe("searchRegistries", () => {
     await expect(searchRegistries(["@unknown"])).rejects.toThrow(
       "Registry not found"
     )
+
+    mockGetRegistry.mockRestore()
+  })
+
+  it("collects errors and continues when continueOnError is set", async () => {
+    vi.mock("./api", () => ({
+      getRegistry: vi.fn(),
+    }))
+
+    const mockGetRegistry = vi.mocked(getRegistry)
+
+    mockGetRegistry.mockImplementation(async (name: string) => {
+      if (name === "@ok") {
+        return {
+          name: "ok/registry",
+          homepage: "https://ok.com",
+          items: [
+            { name: "button", type: "registry:ui", description: "A button" },
+          ],
+        }
+      }
+      throw new Error(`Registry not found: ${name}`)
+    })
+
+    const results = await searchRegistries(["@ok", "@broken"], {
+      continueOnError: true,
+    })
+
+    // Items from the working registry are still returned.
+    expect(results.items).toHaveLength(1)
+    expect(results.items[0].name).toBe("button")
+
+    // The failing registry is recorded in errors instead of throwing.
+    expect(results.errors).toEqual([
+      {
+        registry: "@broken",
+        message: "Registry not found: @broken",
+      },
+    ])
 
     mockGetRegistry.mockRestore()
   })
@@ -651,5 +697,182 @@ describe("buildRegistryItemNameFromRegistry", () => {
   it.each(testCases)("$name", ({ itemName, registry, expected }) => {
     const result = buildRegistryItemNameFromRegistry(itemName, registry)
     expect(result).toBe(expected)
+  })
+})
+
+describe("formatSearchResultType", () => {
+  it("strips the registry prefix", () => {
+    expect(formatSearchResultType("registry:ui")).toBe("ui")
+    expect(formatSearchResultType("registry:block")).toBe("block")
+  })
+
+  it("returns other types unchanged", () => {
+    expect(formatSearchResultType("custom:type")).toBe("custom:type")
+    expect(formatSearchResultType(undefined)).toBe("")
+  })
+})
+
+describe("formatSearchResultDescription", () => {
+  it("returns short descriptions unchanged", () => {
+    expect(formatSearchResultDescription("A simple login form.")).toBe(
+      "A simple login form."
+    )
+  })
+
+  it("truncates long descriptions with an ellipsis", () => {
+    const description =
+      "A dashboard with sidebar, charts, data table, filters, and many other widgets for managing your application."
+
+    const formatted = formatSearchResultDescription(description)
+
+    expect(formatted.length).toBeLessThanOrEqual(
+      SEARCH_RESULT_DESCRIPTION_MAX_LENGTH
+    )
+    expect(formatted.endsWith("...")).toBe(true)
+    expect(formatted).not.toBe(description)
+  })
+})
+
+describe("printSearchResults", () => {
+  it("prints type and description inline", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+
+    printSearchResults(
+      {
+        pagination: {
+          total: 2,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+        },
+        items: [
+          {
+            name: "button",
+            type: "registry:ui",
+            description: "A button component",
+            registry: "@shadcn",
+            addCommandArgument: "@shadcn/button",
+          },
+          {
+            name: "card",
+            type: "registry:ui",
+            registry: "@shadcn",
+            addCommandArgument: "@shadcn/card",
+          },
+        ],
+      },
+      {
+        query: "button",
+        registries: ["@shadcn"],
+      }
+    )
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('Found 2 items matching "button" in @shadcn')
+    )
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Showing 1-2 of 2")
+    )
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /- @shadcn\/button \(ui\) — A button component\n- @shadcn\/card \(ui\)$/
+      )
+    )
+
+    log.mockRestore()
+  })
+
+  it("prints registry when searching multiple registries", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+
+    printSearchResults(
+      {
+        pagination: {
+          total: 1,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+        },
+        items: [
+          {
+            name: "header",
+            type: "registry:component",
+            description: "A header component",
+            registry: "@custom",
+            addCommandArgument: "@custom/header",
+          },
+        ],
+      },
+      {
+        registries: ["@shadcn", "@custom"],
+      }
+    )
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /- @custom\/header \(component\) · @custom — A header component/
+      )
+    )
+
+    log.mockRestore()
+  })
+
+  it("prints a warning for each skipped registry", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+
+    printSearchResults(
+      {
+        pagination: {
+          total: 1,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+        },
+        items: [
+          {
+            name: "button",
+            type: "registry:ui",
+            registry: "@ok",
+            addCommandArgument: "@ok/button",
+          },
+        ],
+        errors: [{ registry: "@broken", message: "Not found" }],
+      },
+      {
+        registries: ["@ok", "@broken"],
+      }
+    )
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Skipped @broken: Not found")
+    )
+
+    log.mockRestore()
+  })
+
+  it("prints a warning when no items are found", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+
+    printSearchResults(
+      {
+        pagination: {
+          total: 0,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+        },
+        items: [],
+      },
+      {
+        query: "missing",
+        registries: ["@shadcn"],
+      }
+    )
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('No items found matching "missing" in @shadcn')
+    )
+
+    log.mockRestore()
   })
 })
