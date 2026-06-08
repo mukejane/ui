@@ -1,4 +1,5 @@
 import {
+  registryItemTypeSchema,
   searchResultErrorSchema,
   searchResultItemSchema,
   searchResultsSchema,
@@ -240,6 +241,23 @@ export function formatSearchResultType(type?: string) {
   }
 
   return type.startsWith("registry:") ? type.slice("registry:".length) : type
+}
+
+// Internal-only types that should not be offered as a --type filter.
+const INTERNAL_TYPES = ["registry:example", "registry:internal"]
+
+// The item types accepted by the --type filter, in shorthand form (e.g. "ui").
+export const SEARCHABLE_TYPES = registryItemTypeSchema.options
+  .filter((type) => !INTERNAL_TYPES.includes(type))
+  .map((type) => formatSearchResultType(type))
+
+// Returns the provided types that are not valid searchable types. Accepts both
+// shorthand ("ui") and the full namespaced form ("registry:ui").
+export function findUnknownSearchTypes(types: string[]): string[] {
+  const valid = new Set(SEARCHABLE_TYPES.map((type) => type.toLowerCase()))
+  return types.filter(
+    (type) => !valid.has(formatSearchResultType(type).toLowerCase())
+  )
 }
 
 export function formatSearchResultDescription(

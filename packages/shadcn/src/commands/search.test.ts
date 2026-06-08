@@ -229,6 +229,28 @@ describe("search command", () => {
     exit.mockRestore()
   })
 
+  it("errors on an unknown --type", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    const exit = mockProcessExit()
+
+    await expect(
+      search.parseAsync(
+        ["@shadcn", "--type", "bogus", "--cwd", "/tmp/test-project"],
+        {
+          from: "user",
+        }
+      )
+    ).rejects.toThrow("process.exit:1")
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Unknown type")
+    )
+    expect(searchRegistries).not.toHaveBeenCalled()
+
+    log.mockRestore()
+    exit.mockRestore()
+  })
+
   it("searches all configured registries when none are provided", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
     const exit = mockProcessExit()

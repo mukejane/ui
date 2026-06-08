@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from "vitest"
 import { getRegistry } from "./api"
 import {
   buildRegistryItemNameFromRegistry,
+  findUnknownSearchTypes,
   formatSearchResultDescription,
   formatSearchResultType,
   printSearchResults,
   SEARCH_RESULT_DESCRIPTION_MAX_LENGTH,
+  SEARCHABLE_TYPES,
   searchRegistries,
 } from "./search"
 
@@ -1003,5 +1005,24 @@ describe("printSearchResults", () => {
     )
 
     log.mockRestore()
+  })
+})
+
+describe("findUnknownSearchTypes", () => {
+  it("accepts known types in shorthand and full form", () => {
+    expect(findUnknownSearchTypes(["ui", "registry:block", "HOOK"])).toEqual([])
+  })
+
+  it("returns the unknown types", () => {
+    expect(findUnknownSearchTypes(["ui", "bogus", "blok"])).toEqual([
+      "bogus",
+      "blok",
+    ])
+  })
+
+  it("does not offer internal-only types", () => {
+    expect(SEARCHABLE_TYPES).not.toContain("example")
+    expect(SEARCHABLE_TYPES).not.toContain("internal")
+    expect(findUnknownSearchTypes(["internal"])).toEqual(["internal"])
   })
 })

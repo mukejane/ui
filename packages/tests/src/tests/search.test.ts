@@ -1042,6 +1042,23 @@ describe("shadcn search", () => {
     ).toBe(true)
   })
 
+  it("errors on an unknown --type", async () => {
+    const fixturePath = await createFixtureTestDirectory("next-app-init")
+    await configureRegistries(fixturePath, {
+      "@shadcn": "http://localhost:9180/r/{name}",
+    })
+
+    const output = await npxShadcn(fixturePath, [
+      "search",
+      "@shadcn",
+      "--type",
+      "bogus",
+    ])
+
+    expect(output.stdout).toContain("Unknown type")
+    expect(output.stdout).toContain("bogus")
+  })
+
   it("searches all configured registries when no registry is provided", async () => {
     const fixturePath = await createFixtureTestDirectory("next-app-init")
     await configureRegistries(fixturePath, {

@@ -2,7 +2,12 @@ import path from "path"
 import { configWithDefaults } from "@/src/registry/config"
 import { BUILTIN_REGISTRIES } from "@/src/registry/constants"
 import { clearRegistryContext } from "@/src/registry/context"
-import { printSearchResults, searchRegistries } from "@/src/registry/search"
+import {
+  findUnknownSearchTypes,
+  printSearchResults,
+  SEARCHABLE_TYPES,
+  searchRegistries,
+} from "@/src/registry/search"
 import { validateRegistryConfigForItems } from "@/src/registry/validator"
 import { rawConfigSchema } from "@/src/schema"
 import { loadEnvFiles } from "@/src/utils/env-loader"
@@ -61,6 +66,23 @@ export const search = new Command()
         limit: opts.limit ? parseInt(opts.limit, 10) : undefined,
         offset: opts.offset ? parseInt(opts.offset, 10) : undefined,
       })
+
+      // Validate type filters up front so an unknown type fails clearly
+      // instead of silently returning no results.
+      if (options.types?.length) {
+        const unknownTypes = findUnknownSearchTypes(options.types)
+        if (unknownTypes.length > 0) {
+          logger.break()
+          logger.error(
+            `Unknown ${unknownTypes.length === 1 ? "type" : "types"}: ${unknownTypes
+              .map((type) => highlighter.info(type))
+              .join(", ")}.`
+          )
+          logger.error(`Valid types: ${SEARCHABLE_TYPES.join(", ")}.`)
+          logger.break()
+          process.exit(1)
+        }
+      }
 
       await loadEnvFiles(options.cwd)
 
