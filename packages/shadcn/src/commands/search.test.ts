@@ -1,6 +1,6 @@
+import { searchRegistries } from "@/src/registry/search"
 import { getConfig } from "@/src/utils/get-config"
 import { ensureRegistriesInConfig } from "@/src/utils/registries"
-import { searchRegistries } from "@/src/registry/search"
 import fsExtra from "fs-extra"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -157,9 +157,7 @@ describe("search command", () => {
     expect(log).toHaveBeenCalledWith(
       expect.stringContaining("Found 2 items in @shadcn")
     )
-    expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("@shadcn/button")
-    )
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("@shadcn/button"))
     expect(log).not.toHaveBeenCalledWith(
       expect.stringContaining('"pagination"')
     )
@@ -173,12 +171,9 @@ describe("search command", () => {
     const exit = mockProcessExit()
 
     await expect(
-      search.parseAsync(
-        ["@shadcn", "--cwd", "/tmp/test-project", "--json"],
-        {
-          from: "user",
-        }
-      )
+      search.parseAsync(["@shadcn", "--cwd", "/tmp/test-project", "--json"], {
+        from: "user",
+      })
     ).rejects.toThrow("process.exit:0")
 
     expect(log).toHaveBeenCalledWith(JSON.stringify(mockResults, null, 2))

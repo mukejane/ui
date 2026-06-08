@@ -64,7 +64,10 @@ export async function searchRegistries(
       type: item.type,
       description: item.description,
       registry,
-      addCommandArgument: buildRegistryItemNameFromRegistry(item.name, registry),
+      addCommandArgument: buildRegistryItemNameFromRegistry(
+        item.name,
+        registry
+      ),
     }))
 
     allItems = allItems.concat(itemsWithRegistry)

@@ -6,8 +6,8 @@ import {
   formatSearchResultDescription,
   formatSearchResultType,
   printSearchResults,
-  searchRegistries,
   SEARCH_RESULT_DESCRIPTION_MAX_LENGTH,
+  searchRegistries,
 } from "./search"
 
 describe("searchRegistries", () => {

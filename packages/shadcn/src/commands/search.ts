@@ -44,11 +44,7 @@ export const search = new Command()
     "-t, --type <type>",
     "filter by item type, e.g. ui, block, hook. Comma-separated for multiple."
   )
-  .option(
-    "-l, --limit <number>",
-    "maximum number of items to display",
-    "100"
-  )
+  .option("-l, --limit <number>", "maximum number of items to display", "100")
   .option("-o, --offset <number>", "number of items to skip", "0")
   .option("--json", "output as JSON.", false)
   .action(async (registries: string[], opts) => {
