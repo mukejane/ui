@@ -16,6 +16,7 @@ export async function searchRegistries(
   registries: string[],
   options?: {
     query?: string
+    types?: string[]
     limit?: number
     offset?: number
     config?: Partial<Config>
@@ -27,7 +28,7 @@ export async function searchRegistries(
     continueOnError?: boolean
   }
 ) {
-  const { query, limit, offset, config, useCache, continueOnError } =
+  const { query, types, limit, offset, config, useCache, continueOnError } =
     options || {}
 
   let allItems: z.infer<typeof searchResultItemSchema>[] = []
@@ -67,6 +68,19 @@ export async function searchRegistries(
     }))
 
     allItems = allItems.concat(itemsWithRegistry)
+  }
+
+  // Filter by type before the fuzzy query. Accepts both shorthand ("ui") and
+  // the full namespaced form ("registry:ui"), case-insensitively.
+  if (types?.length) {
+    const wantedTypes = new Set(
+      types.map((type) => formatSearchResultType(type).toLowerCase())
+    )
+    allItems = allItems.filter(
+      (item) =>
+        item.type &&
+        wantedTypes.has(formatSearchResultType(item.type).toLowerCase())
+    )
   }
 
   if (query) {
@@ -261,15 +275,23 @@ function formatSearchResultItem(
   return `- ${highlighter.info(name)}${typeSuffix}${registrySuffix}${descriptionSuffix}`
 }
 
-// Describes what was searched, e.g. ` matching "button" in @one, @two`. Shared
-// by the results header and the empty-state message so they stay in sync.
+// Describes what was searched, e.g. ` of type ui matching "button" in @one`.
+// Shared by the results header and the empty-state message so they stay in
+// sync. Types are normalized for display ("registry:ui" → "ui") to match how
+// types are shown in the results themselves.
 function formatSearchScope(options: {
   query?: string
+  types?: string[]
   registries: string[]
 }) {
-  const { query, registries } = options
+  const { query, types, registries } = options
 
   let scope = ""
+  if (types?.length) {
+    scope += ` of type ${types
+      .map((type) => formatSearchResultType(type))
+      .join(", ")}`
+  }
   if (query) {
     scope += ` matching ${highlighter.info(`"${query}"`)}`
   }
@@ -284,6 +306,7 @@ export function printSearchResults(
   results: z.infer<typeof searchResultsSchema>,
   options: {
     query?: string
+    types?: string[]
     registries: string[]
   }
 ) {

@@ -236,6 +236,68 @@ describe("searchRegistries", () => {
     mockGetRegistry.mockRestore()
   })
 
+  it("filters by type (shorthand and full namespace, multiple)", async () => {
+    vi.mock("./api", () => ({
+      getRegistry: vi.fn(),
+    }))
+
+    const mockGetRegistry = vi.mocked(getRegistry)
+
+    mockGetRegistry.mockImplementation(async () => ({
+      name: "test/registry",
+      homepage: "https://test.com",
+      items: [
+        { name: "button", type: "registry:ui", description: "" },
+        { name: "dashboard", type: "registry:block", description: "" },
+        { name: "use-foo", type: "registry:hook", description: "" },
+      ],
+    }))
+
+    // Shorthand, multiple types.
+    const multiple = await searchRegistries(["@test"], {
+      types: ["ui", "hook"],
+    })
+    expect(multiple.items.map((item) => item.name)).toEqual([
+      "button",
+      "use-foo",
+    ])
+
+    // Full namespaced form is accepted too.
+    const full = await searchRegistries(["@test"], {
+      types: ["registry:block"],
+    })
+    expect(full.items.map((item) => item.name)).toEqual(["dashboard"])
+
+    mockGetRegistry.mockRestore()
+  })
+
+  it("combines a type filter with a query", async () => {
+    vi.mock("./api", () => ({
+      getRegistry: vi.fn(),
+    }))
+
+    const mockGetRegistry = vi.mocked(getRegistry)
+
+    mockGetRegistry.mockImplementation(async () => ({
+      name: "test/registry",
+      homepage: "https://test.com",
+      items: [
+        { name: "button", type: "registry:ui", description: "A button" },
+        { name: "button-group", type: "registry:block", description: "" },
+      ],
+    }))
+
+    const results = await searchRegistries(["@test"], {
+      query: "button",
+      types: ["ui"],
+    })
+
+    // Both match the query, but only the ui item survives the type filter.
+    expect(results.items.map((item) => item.name)).toEqual(["button"])
+
+    mockGetRegistry.mockRestore()
+  })
+
   it("should return empty items when search has no matches", async () => {
     vi.mock("./api", () => ({
       getRegistry: vi.fn(),
@@ -815,6 +877,35 @@ describe("printSearchResults", () => {
       expect.stringMatching(
         /- @shadcn\/button \(ui\) — A button component\n- @shadcn\/card \(ui\)$/
       )
+    )
+
+    log.mockRestore()
+  })
+
+  it("includes the type filter in the header (normalized for display)", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+
+    printSearchResults(
+      {
+        pagination: { total: 1, offset: 0, limit: 100, hasMore: false },
+        items: [
+          {
+            name: "button",
+            type: "registry:ui",
+            registry: "@shadcn",
+            addCommandArgument: "@shadcn/button",
+          },
+        ],
+      },
+      {
+        // Full namespaced form on input is shown as the shorthand.
+        types: ["registry:ui"],
+        registries: ["@shadcn"],
+      }
+    )
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Found 1 item of type ui in @shadcn")
     )
 
     log.mockRestore()

@@ -18,6 +18,7 @@ import { z } from "zod"
 const searchOptionsSchema = z.object({
   cwd: z.string(),
   query: z.string().optional(),
+  types: z.array(z.string()).optional(),
   limit: z.number().optional(),
   offset: z.number().optional(),
 })
@@ -40,6 +41,10 @@ export const search = new Command()
   )
   .option("-q, --query <query>", "query string")
   .option(
+    "-t, --type <type>",
+    "filter by item type, e.g. ui, block, hook. Comma-separated for multiple."
+  )
+  .option(
     "-l, --limit <number>",
     "maximum number of items to display",
     "100"
@@ -51,6 +56,12 @@ export const search = new Command()
       const options = searchOptionsSchema.parse({
         cwd: path.resolve(opts.cwd),
         query: opts.query,
+        types: opts.type
+          ? opts.type
+              .split(",")
+              .map((type: string) => type.trim())
+              .filter(Boolean)
+          : undefined,
         limit: opts.limit ? parseInt(opts.limit, 10) : undefined,
         offset: opts.offset ? parseInt(opts.offset, 10) : undefined,
       })
@@ -167,6 +178,7 @@ export const search = new Command()
 
       const results = await searchRegistries(registriesToSearch, {
         query: options.query,
+        types: options.types,
         limit: options.limit,
         offset: options.offset,
         config,
@@ -181,6 +193,7 @@ export const search = new Command()
       } else {
         printSearchResults(results, {
           query: options.query,
+          types: options.types,
           registries: registriesToSearch,
         })
       }
