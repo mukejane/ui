@@ -6,6 +6,7 @@ import { validateRegistryConfigForItems } from "@/src/registry/validator"
 import { rawConfigSchema } from "@/src/schema"
 import { loadEnvFiles } from "@/src/utils/env-loader"
 import { createConfig, getConfig } from "@/src/utils/get-config"
+import { printSearchResults } from "@/src/utils/format-search-results"
 import { handleError } from "@/src/utils/handle-error"
 import { ensureRegistriesInConfig } from "@/src/utils/registries"
 import { Command } from "commander"
@@ -42,6 +43,7 @@ export const search = new Command()
     "100"
   )
   .option("-o, --offset <number>", "number of items to skip", "0")
+  .option("--json", "output as JSON.", false)
   .action(async (registries: string[], opts) => {
     try {
       const options = searchOptionsSchema.parse({
@@ -111,7 +113,15 @@ export const search = new Command()
         config,
       })
 
-      console.log(JSON.stringify(results, null, 2))
+      if (opts.json) {
+        console.log(JSON.stringify(results, null, 2))
+      } else {
+        printSearchResults(results, {
+          query: options.query,
+          registries,
+        })
+      }
+
       process.exit(0)
     } catch (error) {
       handleError(error)

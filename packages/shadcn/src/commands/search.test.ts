@@ -1,4 +1,5 @@
 import { ensureRegistriesInConfig } from "@/src/utils/registries"
+import { searchRegistries } from "@/src/registry/search"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { search } from "./search"
@@ -35,6 +36,30 @@ const baseConfig = {
   },
 }
 
+const mockResults = {
+  pagination: {
+    total: 2,
+    offset: 0,
+    limit: 100,
+    hasMore: false,
+  },
+  items: [
+    {
+      name: "button",
+      type: "registry:ui",
+      description: "A button component",
+      registry: "@shadcn",
+      addCommandArgument: "@shadcn/button",
+    },
+    {
+      name: "card",
+      type: "registry:ui",
+      registry: "@shadcn",
+      addCommandArgument: "@shadcn/card",
+    },
+  ],
+}
+
 vi.mock("fs-extra", () => ({
   default: {
     existsSync: vi.fn(() => false),
@@ -63,7 +88,7 @@ vi.mock("@/src/registry/validator", () => ({
 }))
 
 vi.mock("@/src/registry/search", () => ({
-  searchRegistries: vi.fn(() => []),
+  searchRegistries: vi.fn(() => mockResults),
 }))
 
 vi.mock("@/src/registry/context", () => ({
@@ -108,6 +133,50 @@ describe("search command", () => {
         writeFile: false,
       }
     )
+
+    log.mockRestore()
+    exit.mockRestore()
+  })
+
+  it("prints human-readable output by default", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    const exit = mockProcessExit()
+
+    await expect(
+      search.parseAsync(["@shadcn", "--cwd", "/tmp/test-project"], {
+        from: "user",
+      })
+    ).rejects.toThrow("process.exit:0")
+
+    expect(searchRegistries).toHaveBeenCalled()
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("Found 2 items in @shadcn")
+    )
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("@shadcn/button")
+    )
+    expect(log).not.toHaveBeenCalledWith(
+      expect.stringContaining('"pagination"')
+    )
+
+    log.mockRestore()
+    exit.mockRestore()
+  })
+
+  it("prints JSON output with --json", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    const exit = mockProcessExit()
+
+    await expect(
+      search.parseAsync(
+        ["@shadcn", "--cwd", "/tmp/test-project", "--json"],
+        {
+          from: "user",
+        }
+      )
+    ).rejects.toThrow("process.exit:0")
+
+    expect(log).toHaveBeenCalledWith(JSON.stringify(mockResults, null, 2))
 
     log.mockRestore()
     exit.mockRestore()
